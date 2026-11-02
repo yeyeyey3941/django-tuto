@@ -11,7 +11,7 @@ from typing import List, Optional
 
 @dataclass
 class CreateProductDTO:
-    """Áˆ İ1 ”­ DTO"""
+    """ìƒí’ˆ ìƒì„± ìš”ì²­ DTO"""
     name: str
     price: Decimal
     stock: int
@@ -20,7 +20,7 @@ class CreateProductDTO:
 
 @dataclass
 class UpdateProductDTO:
-    """Áˆ Åpt¸ ”­ DTO"""
+    """ìƒí’ˆ ì—…ë°ì´íŠ¸ ìš”ì²­ DTO"""
     name: Optional[str] = None
     price: Optional[Decimal] = None
     stock: Optional[int] = None
@@ -29,7 +29,7 @@ class UpdateProductDTO:
 
 @dataclass
 class ProductDTO:
-    """Áˆ Qõ DTO"""
+    """ìƒí’ˆ ì‘ë‹µ DTO"""
     id: int
     name: str
     price: Decimal
@@ -41,14 +41,14 @@ class ProductDTO:
 
 @dataclass
 class OrderItemRequestDTO:
-    """ü8 Dt\ ”­ DTO"""
+    """ì£¼ë¬¸ ì•„ì´í…œ ìš”ì²­ DTO"""
     product_id: int
     quantity: int
 
 
 @dataclass
 class OrderItemDTO:
-    """ü8 Dt\ Qõ DTO"""
+    """ì£¼ë¬¸ ì•„ì´í…œ ì‘ë‹µ DTO"""
     id: int
     product_id: int
     product_name: str
@@ -59,14 +59,14 @@ class OrderItemDTO:
 
 @dataclass
 class CreateOrderDTO:
-    """ü8 İ1 ”­ DTO"""
+    """ì£¼ë¬¸ ìƒì„± ìš”ì²­ DTO"""
     user_id: int
     items: List[OrderItemRequestDTO]
 
 
 @dataclass
 class OrderDTO:
-    """ü8 Qõ DTO"""
+    """ì£¼ë¬¸ ì‘ë‹µ DTO"""
     id: int
     user_id: int
     status: str
@@ -77,5 +77,5 @@ class OrderDTO:
 
 @dataclass
 class UpdateOrderStatusDTO:
-    """ü8 ÁÜ Åpt¸ ”­ DTO"""
+    """ì£¼ë¬¸ ìƒíƒœ ì—…ë°ì´íŠ¸ ìš”ì²­ DTO"""
     status: str
