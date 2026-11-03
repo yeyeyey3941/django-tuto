@@ -265,6 +265,13 @@ class OrderViewSet(viewsets.ViewSet):
     @action(detail=True, methods=["post"])
     def update_status(self, request, pk=None):
         """주문 상태 업데이트"""
+        # 권한 확인: 주문 상태 변경(결제/배송 등)은 관리자만 가능
+        if not request.user.is_staff:
+            return Response(
+                {"error": "Permission denied"},
+                status=status.HTTP_403_FORBIDDEN
+            )
+
         serializer = UpdateOrderStatusSerializer(data=request.data)
         if not serializer.is_valid():
             return Response(
@@ -304,18 +311,19 @@ class OrderViewSet(viewsets.ViewSet):
     def cancel(self, request, pk=None):
         """주문 취소"""
         try:
+            # 권한 확인: 취소(재고 복원)를 실행하기 전에 소유자인지 먼저 확인
+            order = GetOrderUseCase(self.order_repository).execute(int(pk))
+            if order.user_id != request.user.id and not request.user.is_superuser:
+                return Response(
+                    {"error": "Permission denied"},
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
             use_case = CancelOrderUseCase(
                 self.order_repository,
                 self.product_repository
             )
             order_dto = use_case.execute(int(pk))
-
-            # 권한 확인: 자신의 주문만 취소 가능
-            if order_dto.user_id != request.user.id and not request.user.is_superuser:
-                return Response(
-                    {"error": "Permission denied"},
-                    status=status.HTTP_403_FORBIDDEN
-                )
 
             data = OrderSerializer.from_dto(order_dto)
             return Response(data, status=status.HTTP_200_OK)
