@@ -1,0 +1,216 @@
+"""
+Domain Entities for Shop domain.
+
+Entities have unique identities and mutable state.
+They encapsulate business rules and invariants.
+"""
+from dataclasses import dataclass, field
+from datetime import datetime
+from typing import List, Optional
+
+from .value_objects import Money, OrderStatus, Quantity
+from .exceptions import (
+    InsufficientStockError,
+    InvalidOrderStateError,
+    InvalidPriceError,
+    InvalidQuantityError,
+)
+
+
+@dataclass
+class Product:
+    """상품 엔티티"""
+    id: Optional[int]
+    name: str
+    price: Money
+    stock: Quantity
+    description: str = ""
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    def __post_init__(self):
+        """엔티티 유효성 검증"""
+        if not self.name or not self.name.strip():
+            raise ValueError("Product name cannot be empty")
+
+        if self.price <= Money.zero():
+            raise InvalidPriceError("Product price must be positive")
+
+    def has_sufficient_stock(self, requested_quantity: Quantity) -> bool:
+        """충분한 재고가 있는지 확인"""
+        return self.stock >= requested_quantity
+
+    def reserve_stock(self, quantity: Quantity) -> None:
+        """재고 예약 (재고 차감)"""
+        if not self.has_sufficient_stock(quantity):
+            raise InsufficientStockError(
+                f"Insufficient stock for product {self.name}. "
+                f"Requested: {quantity.value}, Available: {self.stock.value}"
+            )
+        self.stock = self.stock - quantity
+
+    def restore_stock(self, quantity: Quantity) -> None:
+        """재고 복원 (주문 취소 시)"""
+        self.stock = self.stock + quantity
+
+    def update_price(self, new_price: Money) -> None:
+        """가격 업데이트"""
+        if new_price <= Money.zero():
+            raise InvalidPriceError("Product price must be positive")
+        self.price = new_price
+
+    def is_available(self) -> bool:
+        """판매 가능한지 확인"""
+        return self.stock.is_positive()
+
+    def calculate_line_total(self, quantity: Quantity) -> Money:
+        """주문 라인 총액 계산"""
+        if not quantity.is_positive():
+            raise InvalidQuantityError("Quantity must be positive")
+        return self.price * quantity.value
+
+
+@dataclass
+class OrderItem:
+    """주문 아이템 엔티티"""
+    id: Optional[int]
+    product_id: int
+    product_name: str  # 주문 시점의 상품명 보존
+    quantity: Quantity
+    unit_price: Money  # 주문 시점의 단가 보존
+    order_id: Optional[int] = None
+
+    def __post_init__(self):
+        """엔티티 유효성 검증"""
+        if not self.quantity.is_positive():
+            raise InvalidQuantityError("Order item quantity must be positive")
+
+        if self.unit_price <= Money.zero():
+            raise InvalidPriceError("Order item price must be positive")
+
+    @property
+    def line_total(self) -> Money:
+        """주문 라인 총액 계산"""
+        return self.unit_price * self.quantity.value
+
+    @classmethod
+    def create_from_product(
+        cls,
+        product: Product,
+        quantity: Quantity,
+        order_id: Optional[int] = None
+    ) -> 'OrderItem':
+        """상품으로부터 주문 아이템 생성"""
+        if not quantity.is_positive():
+            raise InvalidQuantityError("Quantity must be positive")
+
+        if not product.has_sufficient_stock(quantity):
+            raise InsufficientStockError(
+                f"Insufficient stock for product {product.name}"
+            )
+
+        return cls(
+            id=None,
+            product_id=product.id,
+            product_name=product.name,
+            quantity=quantity,
+            unit_price=product.price,
+            order_id=order_id
+        )
+
+
+@dataclass
+class Order:
+    """주문 엔티티 (Aggregate Root)"""
+    id: Optional[int]
+    user_id: int
+    status: OrderStatus
+    items: List[OrderItem] = field(default_factory=list)
+    created_at: Optional[datetime] = None
+
+    def __post_init__(self):
+        """엔티티 유효성 검증"""
+        if not self.items:
+            raise ValueError("Order must have at least one item")
+
+    @property
+    def total_amount(self) -> Money:
+        """주문 총액 계산"""
+        if not self.items:
+            return Money.zero()
+
+        total = Money.zero()
+        for item in self.items:
+            total = total + item.line_total
+        return total
+
+    @property
+    def total_items_count(self) -> int:
+        """전체 아이템 수량"""
+        return sum(item.quantity.value for item in self.items)
+
+    def add_item(self, item: OrderItem) -> None:
+        """주문 아이템 추가"""
+        if self.status != OrderStatus.PENDING:
+            raise InvalidOrderStateError(
+                "Cannot add items to non-pending order"
+            )
+        self.items.append(item)
+
+    def change_status(self, new_status: OrderStatus) -> None:
+        """주문 상태 변경"""
+        if not self.status.can_transition_to(new_status):
+            raise InvalidOrderStateError(
+                f"Cannot transition from {self.status.value} to {new_status.value}"
+            )
+        self.status = new_status
+
+    def confirm(self) -> None:
+        """주문 확인"""
+        self.change_status(OrderStatus.CONFIRMED)
+
+    def pay(self) -> None:
+        """결제 완료"""
+        self.change_status(OrderStatus.PAID)
+
+    def ship(self) -> None:
+        """배송 시작"""
+        self.change_status(OrderStatus.SHIPPED)
+
+    def deliver(self) -> None:
+        """배송 완료"""
+        self.change_status(OrderStatus.DELIVERED)
+
+    def cancel(self) -> None:
+        """주문 취소"""
+        self.change_status(OrderStatus.CANCELLED)
+
+    def refund(self) -> None:
+        """환불"""
+        self.change_status(OrderStatus.REFUNDED)
+
+    def can_be_cancelled(self) -> bool:
+        """취소 가능한지 확인"""
+        return self.status in {OrderStatus.PENDING, OrderStatus.CONFIRMED}
+
+    def can_be_refunded(self) -> bool:
+        """환불 가능한지 확인"""
+        return self.status in {OrderStatus.PAID, OrderStatus.DELIVERED}
+
+    @classmethod
+    def create(
+        cls,
+        user_id: int,
+        items: List[OrderItem]
+    ) -> 'Order':
+        """주문 생성 팩토리 메서드"""
+        if not items:
+            raise ValueError("Order must have at least one item")
+
+        return cls(
+            id=None,
+            user_id=user_id,
+            status=OrderStatus.PENDING,
+            items=items,
+            created_at=None
+        )

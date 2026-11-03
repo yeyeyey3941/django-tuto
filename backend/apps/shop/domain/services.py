@@ -1,0 +1,150 @@
+"""
+Domain Services for Shop domain.
+
+Domain services encapsulate business logic that doesn't naturally fit
+within a single entity or value object.
+"""
+from typing import List, Tuple
+
+from .entities import Order, OrderItem, Product
+from .exceptions import InsufficientStockError, InvalidQuantityError
+from .value_objects import Quantity
+
+
+class OrderDomainService:
+    """주문 도메인 서비스"""
+
+    @staticmethod
+    def create_order_with_items(
+        user_id: int,
+        products_and_quantities: List[Tuple[Product, Quantity]]
+    ) -> Order:
+        """
+        상품 목록과 수량으로 주문 생성
+
+        Args:
+            user_id: 주문 사용자 ID
+            products_and_quantities: (상품, 수량) 튜플 리스트
+
+        Returns:
+            생성된 주문
+
+        Raises:
+            InsufficientStockError: 재고 부족 시
+            InvalidQuantityError: 잘못된 수량 시
+        """
+        if not products_and_quantities:
+            raise ValueError("Cannot create order without items")
+
+        # 재고 검증
+        for product, quantity in products_and_quantities:
+            if not quantity.is_positive():
+                raise InvalidQuantityError(
+                    f"Invalid quantity for product {product.name}: {quantity.value}"
+                )
+
+            if not product.has_sufficient_stock(quantity):
+                raise InsufficientStockError(
+                    f"Insufficient stock for product {product.name}. "
+                    f"Requested: {quantity.value}, Available: {product.stock.value}"
+                )
+
+        # 주문 아이템 생성
+        order_items = []
+        for product, quantity in products_and_quantities:
+            item = OrderItem.create_from_product(product, quantity)
+            order_items.append(item)
+
+        # 주문 생성
+        order = Order.create(user_id=user_id, items=order_items)
+
+        return order
+
+    @staticmethod
+    def reserve_inventory_for_order(
+        order: Order,
+        products: List[Product]
+    ) -> None:
+        """
+        주문에 대한 재고 예약
+
+        Args:
+            order: 주문
+            products: 상품 리스트
+
+        Raises:
+            InsufficientStockError: 재고 부족 시
+        """
+        # 상품 ID로 매핑
+        product_map = {p.id: p for p in products}
+
+        # 각 주문 아이템에 대해 재고 예약
+        for item in order.items:
+            product = product_map.get(item.product_id)
+            if not product:
+                raise ValueError(f"Product {item.product_id} not found")
+
+            product.reserve_stock(item.quantity)
+
+    @staticmethod
+    def restore_inventory_for_order(
+        order: Order,
+        products: List[Product]
+    ) -> None:
+        """
+        주문 취소 시 재고 복원
+
+        Args:
+            order: 취소된 주문
+            products: 상품 리스트
+        """
+        # 상품 ID로 매핑
+        product_map = {p.id: p for p in products}
+
+        # 각 주문 아이템에 대해 재고 복원
+        for item in order.items:
+            product = product_map.get(item.product_id)
+            if not product:
+                continue  # 상품이 삭제된 경우 무시
+
+            product.restore_stock(item.quantity)
+
+
+class InventoryDomainService:
+    """재고 도메인 서비스"""
+
+    @staticmethod
+    def check_availability(
+        product: Product,
+        requested_quantity: Quantity
+    ) -> bool:
+        """
+        재고 가용성 확인
+
+        Args:
+            product: 상품
+            requested_quantity: 요청 수량
+
+        Returns:
+            가용 여부
+        """
+        return product.has_sufficient_stock(requested_quantity)
+
+    @staticmethod
+    def bulk_check_availability(
+        products_and_quantities: List[Tuple[Product, Quantity]]
+    ) -> List[Tuple[Product, bool]]:
+        """
+        여러 상품의 재고 가용성 일괄 확인
+
+        Args:
+            products_and_quantities: (상품, 수량) 튜플 리스트
+
+        Returns:
+            (상품, 가용 여부) 튜플 리스트
+        """
+        results = []
+        for product, quantity in products_and_quantities:
+            is_available = product.has_sufficient_stock(quantity)
+            results.append((product, is_available))
+        return results

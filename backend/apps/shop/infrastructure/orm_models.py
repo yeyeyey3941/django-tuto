@@ -1,0 +1,76 @@
+"""
+ORM Models for Shop domain.
+
+These are Django ORM models that map to database tables.
+They should be kept separate from domain entities.
+"""
+from django.conf import settings
+from django.db import models
+
+
+class ProductORM(models.Model):
+    """상품 ORM 모델"""
+    name = models.CharField(max_length=200)
+    price = models.DecimalField(max_digits=10, decimal_places=2)
+    stock = models.PositiveIntegerField(default=0)
+    description = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "shop_product"
+        verbose_name = "Product"
+        verbose_name_plural = "Products"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return self.name
+
+
+class OrderORM(models.Model):
+    """주문 ORM 모델"""
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="orders"
+    )
+    total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    status = models.CharField(max_length=20, default="pending")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "shop_order"
+        verbose_name = "Order"
+        verbose_name_plural = "Orders"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "-created_at"]),
+            models.Index(fields=["status"]),
+        ]
+
+    def __str__(self):
+        return f"Order #{self.id} by {self.user}"
+
+
+class OrderItemORM(models.Model):
+    """주문 아이템 ORM 모델"""
+    order = models.ForeignKey(
+        OrderORM,
+        on_delete=models.CASCADE,
+        related_name="items"
+    )
+    product = models.ForeignKey(
+        ProductORM,
+        on_delete=models.CASCADE
+    )
+    product_name = models.CharField(max_length=200)  # 주문 시점 상품명 보존
+    quantity = models.PositiveIntegerField(default=1)
+    unit_price = models.DecimalField(max_digits=10, decimal_places=2)  # 주문 시점 단가 보존
+
+    class Meta:
+        db_table = "shop_order_item"
+        verbose_name = "Order Item"
+        verbose_name_plural = "Order Items"
+
+    def __str__(self):
+        return f"{self.product_name} (x{self.quantity})"

@@ -1,6 +1,7 @@
-from django.test import TestCase
 from django.contrib.auth import get_user_model
-from shop.models import Product, Order, OrderItem
+from django.test import TestCase
+
+from apps.shop.models import Order, OrderItem, Product
 
 User = get_user_model()
 
@@ -13,9 +14,12 @@ class EcommerceModelTest(TestCase):
     def test_order_create(self):
         order = Order.objects.create(user=self.user)
         item = OrderItem.objects.create(
-            order=order, product=self.product, quantity=2, price=self.product.price * 2
+            order=order,
+            product=self.product,
+            product_name=self.product.name,
+            quantity=2,
+            unit_price=self.product.price,
         )
-        # 총 주문 금액 갱신 로직 등 테스트
-        order.total_amount = item.price
+        order.total_amount = item.unit_price * item.quantity
         order.save()
         self.assertEqual(order.total_amount, 2000)

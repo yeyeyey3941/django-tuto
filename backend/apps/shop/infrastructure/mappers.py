@@ -1,0 +1,130 @@
+"""
+Mappers for converting between Domain Entities and ORM Models.
+
+Mappers isolate the domain layer from infrastructure concerns.
+"""
+from typing import List, Optional
+
+from ..domain.entities import Order, OrderItem, Product
+from ..domain.value_objects import Money, OrderStatus, Quantity
+from .orm_models import OrderItemORM, OrderORM, ProductORM
+
+
+class ProductMapper:
+    """Product Entity ↔ ORM Model 매퍼"""
+
+    @staticmethod
+    def to_domain(orm_model: ProductORM) -> Product:
+        """ORM 모델을 도메인 엔티티로 변환"""
+        return Product(
+            id=orm_model.id,
+            name=orm_model.name,
+            price=Money.from_decimal(orm_model.price),
+            stock=Quantity(orm_model.stock),
+            description=orm_model.description,
+            created_at=orm_model.created_at,
+            updated_at=orm_model.updated_at
+        )
+
+    @staticmethod
+    def to_orm(domain_entity: Product, orm_model: Optional[ProductORM] = None) -> ProductORM:
+        """도메인 엔티티를 ORM 모델로 변환"""
+        if orm_model is None:
+            orm_model = ProductORM()
+
+        orm_model.name = domain_entity.name
+        orm_model.price = domain_entity.price.to_decimal()
+        orm_model.stock = domain_entity.stock.value
+        orm_model.description = domain_entity.description
+
+        # ID가 있으면 업데이트, 없으면 생성
+        if domain_entity.id:
+            orm_model.id = domain_entity.id
+
+        return orm_model
+
+    @staticmethod
+    def to_domain_list(orm_models: List[ProductORM]) -> List[Product]:
+        """ORM 모델 리스트를 도메인 엔티티 리스트로 변환"""
+        return [ProductMapper.to_domain(orm_model) for orm_model in orm_models]
+
+
+class OrderItemMapper:
+    """OrderItem Entity ↔ ORM Model 매퍼"""
+
+    @staticmethod
+    def to_domain(orm_model: OrderItemORM) -> OrderItem:
+        """ORM 모델을 도메인 엔티티로 변환"""
+        return OrderItem(
+            id=orm_model.id,
+            product_id=orm_model.product_id,
+            product_name=orm_model.product_name,
+            quantity=Quantity(orm_model.quantity),
+            unit_price=Money.from_decimal(orm_model.unit_price),
+            order_id=orm_model.order_id
+        )
+
+    @staticmethod
+    def to_orm(
+        domain_entity: OrderItem,
+        order_orm: OrderORM,
+        product_orm: ProductORM,
+        orm_model: Optional[OrderItemORM] = None
+    ) -> OrderItemORM:
+        """도메인 엔티티를 ORM 모델로 변환"""
+        if orm_model is None:
+            orm_model = OrderItemORM()
+
+        orm_model.order = order_orm
+        orm_model.product = product_orm
+        orm_model.product_name = domain_entity.product_name
+        orm_model.quantity = domain_entity.quantity.value
+        orm_model.unit_price = domain_entity.unit_price.to_decimal()
+
+        if domain_entity.id:
+            orm_model.id = domain_entity.id
+
+        return orm_model
+
+    @staticmethod
+    def to_domain_list(orm_models: List[OrderItemORM]) -> List[OrderItem]:
+        """ORM 모델 리스트를 도메인 엔티티 리스트로 변환"""
+        return [OrderItemMapper.to_domain(orm_model) for orm_model in orm_models]
+
+
+class OrderMapper:
+    """Order Entity ↔ ORM Model 매퍼"""
+
+    @staticmethod
+    def to_domain(orm_model: OrderORM) -> Order:
+        """ORM 모델을 도메인 엔티티로 변환"""
+        # Prefetch된 items를 도메인 엔티티로 변환
+        items = OrderItemMapper.to_domain_list(list(orm_model.items.all()))
+
+        return Order(
+            id=orm_model.id,
+            user_id=orm_model.user_id,
+            status=OrderStatus.from_string(orm_model.status),
+            items=items,
+            created_at=orm_model.created_at
+        )
+
+    @staticmethod
+    def to_orm(domain_entity: Order, orm_model: Optional[OrderORM] = None) -> OrderORM:
+        """도메인 엔티티를 ORM 모델로 변환 (items 제외)"""
+        if orm_model is None:
+            orm_model = OrderORM()
+
+        orm_model.user_id = domain_entity.user_id
+        orm_model.status = domain_entity.status.value
+        orm_model.total_amount = domain_entity.total_amount.to_decimal()
+
+        if domain_entity.id:
+            orm_model.id = domain_entity.id
+
+        return orm_model
+
+    @staticmethod
+    def to_domain_list(orm_models: List[OrderORM]) -> List[Order]:
+        """ORM 모델 리스트를 도메인 엔티티 리스트로 변환"""
+        return [OrderMapper.to_domain(orm_model) for orm_model in orm_models]

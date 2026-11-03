@@ -1,0 +1,189 @@
+"""
+Domain Value Objects for Shop domain.
+
+Value Objects are immutable and defined by their attributes.
+They encapsulate business rules and validation logic.
+"""
+from dataclasses import dataclass
+from decimal import Decimal
+from enum import Enum
+from typing import Any
+
+
+class OrderStatus(Enum):
+    """주문 상태를 나타내는 Value Object"""
+    PENDING = "pending"
+    CONFIRMED = "confirmed"
+    PAID = "paid"
+    SHIPPED = "shipped"
+    DELIVERED = "delivered"
+    CANCELLED = "cancelled"
+    REFUNDED = "refunded"
+
+    def can_transition_to(self, new_status: 'OrderStatus') -> bool:
+        """상태 전환이 가능한지 검증"""
+        allowed_transitions = {
+            OrderStatus.PENDING: {OrderStatus.CONFIRMED, OrderStatus.CANCELLED},
+            OrderStatus.CONFIRMED: {OrderStatus.PAID, OrderStatus.CANCELLED},
+            OrderStatus.PAID: {OrderStatus.SHIPPED, OrderStatus.REFUNDED},
+            OrderStatus.SHIPPED: {OrderStatus.DELIVERED},
+            OrderStatus.DELIVERED: {OrderStatus.REFUNDED},
+            OrderStatus.CANCELLED: set(),
+            OrderStatus.REFUNDED: set(),
+        }
+        return new_status in allowed_transitions.get(self, set())
+
+    @classmethod
+    def from_string(cls, value: str) -> 'OrderStatus':
+        """문자열로부터 OrderStatus 생성"""
+        try:
+            return cls(value)
+        except ValueError:
+            raise ValueError(f"Invalid order status: {value}")
+
+
+@dataclass(frozen=True)
+class Money:
+    """금액을 나타내는 Value Object"""
+    amount: Decimal
+    currency: str = "KRW"
+
+    def __post_init__(self):
+        """금액 유효성 검증"""
+        if not isinstance(self.amount, Decimal):
+            object.__setattr__(self, 'amount', Decimal(str(self.amount)))
+
+        if self.amount < 0:
+            raise ValueError("Amount cannot be negative")
+
+        if self.currency not in ["KRW", "USD", "EUR", "JPY"]:
+            raise ValueError(f"Unsupported currency: {self.currency}")
+
+    def __add__(self, other: 'Money') -> 'Money':
+        """금액 더하기"""
+        if not isinstance(other, Money):
+            raise TypeError("Can only add Money to Money")
+        if self.currency != other.currency:
+            raise ValueError("Cannot add money with different currencies")
+        return Money(self.amount + other.amount, self.currency)
+
+    def __mul__(self, multiplier: int | float) -> 'Money':
+        """금액 곱하기"""
+        return Money(self.amount * Decimal(str(multiplier)), self.currency)
+
+    def __rmul__(self, multiplier: int | float) -> 'Money':
+        """금액 곱하기 (순서 바뀜)"""
+        return self.__mul__(multiplier)
+
+    def __eq__(self, other: Any) -> bool:
+        """동등성 비교"""
+        if not isinstance(other, Money):
+            return False
+        return self.amount == other.amount and self.currency == other.currency
+
+    def __lt__(self, other: 'Money') -> bool:
+        """작음 비교"""
+        if self.currency != other.currency:
+            raise ValueError("Cannot compare money with different currencies")
+        return self.amount < other.amount
+
+    def __le__(self, other: 'Money') -> bool:
+        """작거나 같음 비교"""
+        return self.__eq__(other) or self.__lt__(other)
+
+    def __gt__(self, other: 'Money') -> bool:
+        """큼 비교"""
+        if self.currency != other.currency:
+            raise ValueError("Cannot compare money with different currencies")
+        return self.amount > other.amount
+
+    def __ge__(self, other: 'Money') -> bool:
+        """크거나 같음 비교"""
+        return self.__eq__(other) or self.__gt__(other)
+
+    def to_decimal(self) -> Decimal:
+        """Decimal로 변환"""
+        return self.amount
+
+    @classmethod
+    def zero(cls, currency: str = "KRW") -> 'Money':
+        """0원 생성"""
+        return cls(Decimal("0"), currency)
+
+    @classmethod
+    def from_decimal(cls, amount: Decimal, currency: str = "KRW") -> 'Money':
+        """Decimal로부터 Money 생성"""
+        return cls(amount, currency)
+
+
+@dataclass(frozen=True)
+class Quantity:
+    """수량을 나타내는 Value Object"""
+    value: int
+
+    def __post_init__(self):
+        """수량 유효성 검증"""
+        if not isinstance(self.value, int):
+            object.__setattr__(self, 'value', int(self.value))
+
+        if self.value < 0:
+            raise ValueError("Quantity cannot be negative")
+
+    def __add__(self, other: 'Quantity') -> 'Quantity':
+        """수량 더하기"""
+        if not isinstance(other, Quantity):
+            raise TypeError("Can only add Quantity to Quantity")
+        return Quantity(self.value + other.value)
+
+    def __sub__(self, other: 'Quantity') -> 'Quantity':
+        """수량 빼기"""
+        if not isinstance(other, Quantity):
+            raise TypeError("Can only subtract Quantity from Quantity")
+        result = self.value - other.value
+        if result < 0:
+            raise ValueError("Result quantity cannot be negative")
+        return Quantity(result)
+
+    def __eq__(self, other: Any) -> bool:
+        """동등성 비교"""
+        if not isinstance(other, Quantity):
+            return False
+        return self.value == other.value
+
+    def __lt__(self, other: 'Quantity') -> bool:
+        """작음 비교"""
+        if not isinstance(other, Quantity):
+            raise TypeError("Can only compare Quantity with Quantity")
+        return self.value < other.value
+
+    def __le__(self, other: 'Quantity') -> bool:
+        """작거나 같음 비교"""
+        return self.__eq__(other) or self.__lt__(other)
+
+    def __gt__(self, other: 'Quantity') -> bool:
+        """큼 비교"""
+        if not isinstance(other, Quantity):
+            raise TypeError("Can only compare Quantity with Quantity")
+        return self.value > other.value
+
+    def __ge__(self, other: 'Quantity') -> bool:
+        """크거나 같음 비교"""
+        return self.__eq__(other) or self.__gt__(other)
+
+    def is_zero(self) -> bool:
+        """0인지 확인"""
+        return self.value == 0
+
+    def is_positive(self) -> bool:
+        """양수인지 확인"""
+        return self.value > 0
+
+    @classmethod
+    def zero(cls) -> 'Quantity':
+        """0 생성"""
+        return cls(0)
+
+    @classmethod
+    def one(cls) -> 'Quantity':
+        """1 생성"""
+        return cls(1)

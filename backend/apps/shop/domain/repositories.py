@@ -1,0 +1,73 @@
+"""
+Domain Repository Interfaces for Shop domain.
+
+Repositories provide collection-like interfaces for domain entities.
+They abstract data access and persistence concerns.
+"""
+from abc import ABC, abstractmethod
+from typing import List, Optional
+
+from .entities import Order, Product
+
+
+class ProductRepository(ABC):
+    """상품 저장소 인터페이스"""
+
+    @abstractmethod
+    def find_by_id(self, product_id: int) -> Optional[Product]:
+        """ID로 상품 조회"""
+        pass
+
+    @abstractmethod
+    def find_all(self) -> List[Product]:
+        """모든 상품 조회"""
+        pass
+
+    @abstractmethod
+    def save(self, product: Product) -> Product:
+        """상품 저장"""
+        pass
+
+    @abstractmethod
+    def delete(self, product_id: int) -> None:
+        """상품 삭제"""
+        pass
+
+    @abstractmethod
+    def find_by_ids(self, product_ids: List[int]) -> List[Product]:
+        """여러 ID로 상품 조회"""
+        pass
+
+
+class OrderRepository(ABC):
+    """주문 저장소 인터페이스"""
+
+    @abstractmethod
+    def find_by_id(self, order_id: int) -> Optional[Order]:
+        """ID로 주문 조회"""
+        pass
+
+    @abstractmethod
+    def find_by_user_id(self, user_id: int) -> List[Order]:
+        """사용자 ID로 주문 목록 조회"""
+        pass
+
+    @abstractmethod
+    def find_all(self) -> List[Order]:
+        """모든 주문 조회"""
+        pass
+
+    @abstractmethod
+    def save(self, order: Order) -> Order:
+        """주문 저장 (생성 및 업데이트)"""
+        pass
+
+    @abstractmethod
+    def delete(self, order_id: int) -> None:
+        """주문 삭제"""
+        pass
+
+    @abstractmethod
+    def next_id(self) -> int:
+        """다음 주문 ID 생성"""
+        pass

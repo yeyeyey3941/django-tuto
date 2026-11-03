@@ -1,0 +1,283 @@
+"""
+Use Cases for Shop application.
+
+Use cases orchestrate business logic by coordinating domain entities,
+services, and repositories.
+"""
+from typing import List, Tuple
+
+from django.db import transaction
+
+from ..domain.entities import Order, Product
+from ..domain.exceptions import OrderNotFoundError, ProductNotFoundError
+from ..domain.repositories import OrderRepository, ProductRepository
+from ..domain.services import OrderDomainService
+from ..domain.value_objects import Money, OrderStatus, Quantity
+from .dto import (
+    CreateOrderDTO,
+    CreateProductDTO,
+    OrderDTO,
+    OrderItemDTO,
+    ProductDTO,
+    UpdateOrderStatusDTO,
+    UpdateProductDTO,
+)
+
+
+class CreateProductUseCase:
+    """상품 생성 유스케이스"""
+
+    def __init__(self, product_repository: ProductRepository):
+        self.product_repository = product_repository
+
+    def execute(self, dto: CreateProductDTO) -> ProductDTO:
+        """상품 생성"""
+        product = Product(
+            id=None,
+            name=dto.name,
+            price=Money.from_decimal(dto.price),
+            stock=Quantity(dto.stock),
+            description=dto.description
+        )
+
+        saved_product = self.product_repository.save(product)
+        return self._to_dto(saved_product)
+
+    @staticmethod
+    def _to_dto(product: Product) -> ProductDTO:
+        """Product Entity를 DTO로 변환"""
+        return ProductDTO(
+            id=product.id,
+            name=product.name,
+            price=product.price.to_decimal(),
+            stock=product.stock.value,
+            description=product.description,
+            created_at=product.created_at,
+            updated_at=product.updated_at
+        )
+
+
+class UpdateProductUseCase:
+    """상품 업데이트 유스케이스"""
+
+    def __init__(self, product_repository: ProductRepository):
+        self.product_repository = product_repository
+
+    def execute(self, product_id: int, dto: UpdateProductDTO) -> ProductDTO:
+        """상품 업데이트"""
+        product = self.product_repository.find_by_id(product_id)
+        if not product:
+            raise ProductNotFoundError(f"Product {product_id} not found")
+
+        # 업데이트할 필드만 변경
+        if dto.name is not None:
+            product.name = dto.name
+        if dto.price is not None:
+            product.update_price(Money.from_decimal(dto.price))
+        if dto.stock is not None:
+            product.stock = Quantity(dto.stock)
+        if dto.description is not None:
+            product.description = dto.description
+
+        saved_product = self.product_repository.save(product)
+        return CreateProductUseCase._to_dto(saved_product)
+
+
+class GetProductUseCase:
+    """상품 조회 유스케이스"""
+
+    def __init__(self, product_repository: ProductRepository):
+        self.product_repository = product_repository
+
+    def execute(self, product_id: int) -> ProductDTO:
+        """상품 조회"""
+        product = self.product_repository.find_by_id(product_id)
+        if not product:
+            raise ProductNotFoundError(f"Product {product_id} not found")
+
+        return CreateProductUseCase._to_dto(product)
+
+
+class ListProductsUseCase:
+    """상품 목록 조회 유스케이스"""
+
+    def __init__(self, product_repository: ProductRepository):
+        self.product_repository = product_repository
+
+    def execute(self) -> List[ProductDTO]:
+        """상품 목록 조회"""
+        products = self.product_repository.find_all()
+        return [CreateProductUseCase._to_dto(p) for p in products]
+
+
+class CreateOrderUseCase:
+    """주문 생성 유스케이스"""
+
+    def __init__(
+        self,
+        order_repository: OrderRepository,
+        product_repository: ProductRepository
+    ):
+        self.order_repository = order_repository
+        self.product_repository = product_repository
+
+    @transaction.atomic
+    def execute(self, dto: CreateOrderDTO) -> OrderDTO:
+        """
+        주문 생성 및 재고 차감
+
+        트랜잭션 내에서 주문 생성과 재고 차감을 함께 수행합니다.
+        """
+        # 상품 조회
+        product_ids = [item.product_id for item in dto.items]
+        products = self.product_repository.find_by_ids(product_ids)
+
+        if len(products) != len(set(product_ids)):
+            found_ids = {p.id for p in products}
+            missing_ids = set(product_ids) - found_ids
+            raise ProductNotFoundError(f"Products not found: {missing_ids}")
+
+        # 상품 ID로 매핑
+        product_map = {p.id: p for p in products}
+
+        # (상품, 수량) 튜플 리스트 생성
+        products_and_quantities: List[Tuple[Product, Quantity]] = []
+        for item_dto in dto.items:
+            product = product_map[item_dto.product_id]
+            quantity = Quantity(item_dto.quantity)
+            products_and_quantities.append((product, quantity))
+
+        # 도메인 서비스로 주문 생성
+        order = OrderDomainService.create_order_with_items(
+            user_id=dto.user_id,
+            products_and_quantities=products_and_quantities
+        )
+
+        # 재고 예약
+        OrderDomainService.reserve_inventory_for_order(order, products)
+
+        # 재고 저장
+        for product in products:
+            self.product_repository.save(product)
+
+        # 주문 저장
+        saved_order = self.order_repository.save(order)
+
+        return self._to_dto(saved_order)
+
+    @staticmethod
+    def _to_dto(order: Order) -> OrderDTO:
+        """Order Entity를 DTO로 변환"""
+        items_dto = [
+            OrderItemDTO(
+                id=item.id,
+                product_id=item.product_id,
+                product_name=item.product_name,
+                quantity=item.quantity.value,
+                unit_price=item.unit_price.to_decimal(),
+                line_total=item.line_total.to_decimal()
+            )
+            for item in order.items
+        ]
+
+        return OrderDTO(
+            id=order.id,
+            user_id=order.user_id,
+            status=order.status.value,
+            total_amount=order.total_amount.to_decimal(),
+            items=items_dto,
+            created_at=order.created_at
+        )
+
+
+class GetOrderUseCase:
+    """주문 조회 유스케이스"""
+
+    def __init__(self, order_repository: OrderRepository):
+        self.order_repository = order_repository
+
+    def execute(self, order_id: int) -> OrderDTO:
+        """주문 조회"""
+        order = self.order_repository.find_by_id(order_id)
+        if not order:
+            raise OrderNotFoundError(f"Order {order_id} not found")
+
+        return CreateOrderUseCase._to_dto(order)
+
+
+class ListUserOrdersUseCase:
+    """사용자 주문 목록 조회 유스케이스"""
+
+    def __init__(self, order_repository: OrderRepository):
+        self.order_repository = order_repository
+
+    def execute(self, user_id: int) -> List[OrderDTO]:
+        """사용자 주문 목록 조회"""
+        orders = self.order_repository.find_by_user_id(user_id)
+        return [CreateOrderUseCase._to_dto(o) for o in orders]
+
+
+class UpdateOrderStatusUseCase:
+    """주문 상태 업데이트 유스케이스"""
+
+    def __init__(self, order_repository: OrderRepository):
+        self.order_repository = order_repository
+
+    def execute(self, order_id: int, dto: UpdateOrderStatusDTO) -> OrderDTO:
+        """주문 상태 업데이트"""
+        order = self.order_repository.find_by_id(order_id)
+        if not order:
+            raise OrderNotFoundError(f"Order {order_id} not found")
+
+        new_status = OrderStatus.from_string(dto.status)
+        order.change_status(new_status)
+
+        saved_order = self.order_repository.save(order)
+        return CreateOrderUseCase._to_dto(saved_order)
+
+
+class CancelOrderUseCase:
+    """주문 취소 유스케이스"""
+
+    def __init__(
+        self,
+        order_repository: OrderRepository,
+        product_repository: ProductRepository
+    ):
+        self.order_repository = order_repository
+        self.product_repository = product_repository
+
+    @transaction.atomic
+    def execute(self, order_id: int) -> OrderDTO:
+        """
+        주문 취소 및 재고 복원
+
+        트랜잭션 내에서 주문 취소와 재고 복원을 함께 수행합니다.
+        """
+        # 주문 조회
+        order = self.order_repository.find_by_id(order_id)
+        if not order:
+            raise OrderNotFoundError(f"Order {order_id} not found")
+
+        # 취소 가능 여부 확인
+        if not order.can_be_cancelled():
+            raise ValueError(f"Order {order_id} cannot be cancelled")
+
+        # 상품 조회
+        product_ids = [item.product_id for item in order.items]
+        products = self.product_repository.find_by_ids(product_ids)
+
+        # 재고 복원
+        OrderDomainService.restore_inventory_for_order(order, products)
+
+        # 재고 저장
+        for product in products:
+            self.product_repository.save(product)
+
+        # 주문 취소
+        order.cancel()
+
+        # 주문 저장
+        saved_order = self.order_repository.save(order)
+
+        return CreateOrderUseCase._to_dto(saved_order)

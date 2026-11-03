@@ -1,0 +1,123 @@
+"""
+Repository Implementations for Shop domain.
+
+These implementations use Django ORM to persist and retrieve domain entities.
+"""
+from typing import List, Optional
+
+from django.db import transaction
+
+from ..domain.entities import Order, Product
+from ..domain.repositories import OrderRepository, ProductRepository
+from .mappers import OrderItemMapper, OrderMapper, ProductMapper
+from .orm_models import OrderItemORM, OrderORM, ProductORM
+
+
+class DjangoProductRepository(ProductRepository):
+    """Django ORM 기반 상품 저장소 구현"""
+
+    def find_by_id(self, product_id: int) -> Optional[Product]:
+        """ID로 상품 조회"""
+        try:
+            orm_model = ProductORM.objects.get(id=product_id)
+            return ProductMapper.to_domain(orm_model)
+        except ProductORM.DoesNotExist:
+            return None
+
+    def find_all(self) -> List[Product]:
+        """모든 상품 조회"""
+        orm_models = ProductORM.objects.all()
+        return ProductMapper.to_domain_list(list(orm_models))
+
+    def save(self, product: Product) -> Product:
+        """상품 저장"""
+        if product.id:
+            # 업데이트
+            try:
+                orm_model = ProductORM.objects.get(id=product.id)
+                orm_model = ProductMapper.to_orm(product, orm_model)
+            except ProductORM.DoesNotExist:
+                orm_model = ProductMapper.to_orm(product)
+        else:
+            # 생성
+            orm_model = ProductMapper.to_orm(product)
+
+        orm_model.save()
+
+        # 저장 후 도메인 엔티티 반환
+        return ProductMapper.to_domain(orm_model)
+
+    def delete(self, product_id: int) -> None:
+        """상품 삭제"""
+        ProductORM.objects.filter(id=product_id).delete()
+
+    def find_by_ids(self, product_ids: List[int]) -> List[Product]:
+        """여러 ID로 상품 조회"""
+        orm_models = ProductORM.objects.filter(id__in=product_ids)
+        return ProductMapper.to_domain_list(list(orm_models))
+
+
+class DjangoOrderRepository(OrderRepository):
+    """Django ORM 기반 주문 저장소 구현"""
+
+    def find_by_id(self, order_id: int) -> Optional[Order]:
+        """ID로 주문 조회"""
+        try:
+            orm_model = OrderORM.objects.prefetch_related('items').get(id=order_id)
+            return OrderMapper.to_domain(orm_model)
+        except OrderORM.DoesNotExist:
+            return None
+
+    def find_by_user_id(self, user_id: int) -> List[Order]:
+        """사용자 ID로 주문 목록 조회"""
+        orm_models = OrderORM.objects.filter(user_id=user_id).prefetch_related('items')
+        return OrderMapper.to_domain_list(list(orm_models))
+
+    def find_all(self) -> List[Order]:
+        """모든 주문 조회"""
+        orm_models = OrderORM.objects.prefetch_related('items').all()
+        return OrderMapper.to_domain_list(list(orm_models))
+
+    @transaction.atomic
+    def save(self, order: Order) -> Order:
+        """
+        주문 저장 (생성 및 업데이트)
+
+        트랜잭션 내에서 주문과 주문 아이템을 함께 저장합니다.
+        """
+        if order.id:
+            # 업데이트
+            try:
+                order_orm = OrderORM.objects.get(id=order.id)
+                order_orm = OrderMapper.to_orm(order, order_orm)
+            except OrderORM.DoesNotExist:
+                order_orm = OrderMapper.to_orm(order)
+        else:
+            # 생성
+            order_orm = OrderMapper.to_orm(order)
+
+        order_orm.save()
+
+        # 기존 아이템 삭제 후 재생성 (간단한 구현)
+        OrderItemORM.objects.filter(order=order_orm).delete()
+
+        # 주문 아이템 저장
+        for item in order.items:
+            product_orm = ProductORM.objects.get(id=item.product_id)
+            item_orm = OrderItemMapper.to_orm(item, order_orm, product_orm)
+            item_orm.save()
+
+        # 저장 후 도메인 엔티티 반환
+        order_orm.refresh_from_db()
+        return OrderMapper.to_domain(order_orm)
+
+    def delete(self, order_id: int) -> None:
+        """주문 삭제"""
+        # Cascade delete로 OrderItem도 함께 삭제됨
+        OrderORM.objects.filter(id=order_id).delete()
+
+    def next_id(self) -> Optional[int]:
+        """다음 주문 ID 생성"""
+        # Django ORM에서는 auto-increment ID를 사용하므로 None 반환
+        # 실제 ID는 save 시 생성됨
+        return None
